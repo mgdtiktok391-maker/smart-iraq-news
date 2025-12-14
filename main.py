@@ -10,45 +10,68 @@ import google.generativeai as genai
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from google.auth.transport.requests import Request
 
-# ================= إعدادات البيئة =================
+# ================= Secrets =================
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-BLOGGER_TOKEN_STR = os.getenv("BLOGGER_TOKEN")
+CLIENT_ID = os.getenv("CLIENT_ID")
+CLIENT_SECRET = os.getenv("CLIENT_SECRET")
+REFRESH_TOKEN = os.getenv("REFRESH_TOKEN")
+BLOG_URL = os.getenv("BLOG_URL")  # optional, fallback only
 
-if not GEMINI_API_KEY:
-    raise RuntimeError("❌ Missing GEMINI_API_KEY in GitHub Secrets")
+missing = [
+    name for name, val in {
+        "GEMINI_API_KEY": GEMINI_API_KEY,
+        "CLIENT_ID": CLIENT_ID,
+        "CLIENT_SECRET": CLIENT_SECRET,
+        "REFRESH_TOKEN": REFRESH_TOKEN,
+    }.items() if not val
+]
 
-if not BLOGGER_TOKEN_STR:
-    raise RuntimeError("❌ Missing BLOGGER_TOKEN in GitHub Secrets")
+if missing:
+    raise RuntimeError(f"❌ Missing secrets: {', '.join(missing)}")
 
-# إعداد Gemini
+# ================= Gemini =================
+
 genai.configure(api_key=GEMINI_API_KEY)
 
 FALLBACK_TOPICS = [
     "مستقبل الذكاء الاصطناعي في التعليم 2025",
     "أفضل طرق حماية الخصوصية على الإنترنت",
-    "كيف تبدأ العمل الحر Freelancing خطوة بخطوة",
+    "كيف تبدأ العمل الحر خطوة بخطوة",
     "تطبيقات لا غنى عنها لزيادة الإنتاجية",
-    "شرح تقنية البلوك تشين للمبتدئين"
+    "شرح تقنية البلوك تشين للمبتدئين",
 ]
 
 # ================= Blogger =================
 
 def get_blogger_service():
-    token_info = json.loads(BLOGGER_TOKEN_STR)
-    creds = Credentials.from_authorized_user_info(
-        token_info,
-        scopes=["https://www.googleapis.com/auth/blogger"]
+    creds = Credentials(
+        token=None,
+        refresh_token=REFRESH_TOKEN,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=CLIENT_ID,
+        client_secret=CLIENT_SECRET,
+        scopes=["https://www.googleapis.com/auth/blogger"],
     )
+
+    # توليد access token فعلي
+    creds.refresh(Request())
+
     return build("blogger", "v3", credentials=creds, cache_discovery=False)
 
 def get_blog_id(service):
     blogs = service.blogs().listByUser(userId="self").execute()
-    if not blogs.get("items"):
-        return None, None
-    blog = blogs["items"][0]
-    return blog["id"], blog["name"]
+    if blogs.get("items"):
+        blog = blogs["items"][0]
+        return blog["id"], blog["name"]
+
+    if BLOG_URL:
+        blog = service.blogs().getByUrl(url=BLOG_URL).execute()
+        return blog["id"], blog["name"]
+
+    return None, None
 
 def get_recent_titles(service, blog_id):
     titles = []
@@ -66,14 +89,14 @@ def get_recent_titles(service, blog_id):
 
 # ================= Logic =================
 
-def clean_text(text):
+def clean(text):
     return re.sub(r"[^\w\s]", "", text).lower()
 
-def check_duplication(new_topic, old_titles):
-    new_words = set(clean_text(new_topic).split())
-    for title in old_titles:
-        common = new_words.intersection(set(clean_text(title).split()))
-        if new_words and len(common) / len(new_words) > 0.5:
+def is_duplicate(new_title, old_titles):
+    nw = set(clean(new_title).split())
+    for t in old_titles:
+        ow = set(clean(t).split())
+        if nw and len(nw & ow) / len(nw) > 0.5:
             return True
     return False
 
@@ -82,22 +105,24 @@ def get_trends():
         "https://trends.google.com/trends/trendingsearches/daily/rss?geo=SA",
         "https://trends.google.com/trends/trendingsearches/daily/rss?geo=EG",
     ]
-    trends = []
+    topics = []
     for url in urls:
         feed = feedparser.parse(url)
-        for entry in feed.entries[:2]:
-            trends.append(entry.title)
-    trends.extend(FALLBACK_TOPICS)
-    random.shuffle(trends)
-    return trends
+        for e in feed.entries[:2]:
+            topics.append(e.title)
+
+    topics.extend(FALLBACK_TOPICS)
+    random.shuffle(topics)
+    return topics
 
 @backoff.on_exception(backoff.expo, Exception, max_tries=3)
-def generate_content(topic):
-    print(f"✍ Generating article: {topic}")
+def generate_article(topic):
+    print(f"✍ Writing article: {topic}")
+
     model = genai.GenerativeModel("gemini-1.5-flash")
 
     prompt = f"""
-    اكتب مقالاً تقنياً احترافياً بعنوان: "{topic}"
+    اكتب مقالًا تقنيًا عربيًا احترافيًا بعنوان: "{topic}"
 
     الشروط:
     - تنسيق Markdown
@@ -106,19 +131,23 @@ def generate_content(topic):
     - بدون مقدمات زائدة
     """
 
-    response = model.generate_content(prompt)
-    if not response.text:
+    res = model.generate_content(prompt)
+    if not res.text:
         raise RuntimeError("Empty Gemini response")
-    return response.text
+    return res.text
 
-def get_ai_image():
+def get_image():
     seed = random.randint(1, 9999)
-    return f"https://image.pollinations.ai/prompt/futuristic%20technology%20ai%20background?width=800&height=450&seed={seed}&nologo=true"
+    return (
+        "https://image.pollinations.ai/prompt/"
+        "futuristic%20technology%20ai%20background"
+        f"?width=800&height=450&seed={seed}&nologo=true"
+    )
 
 # ================= Main =================
 
 def main():
-    print("🚀 Auto Blogger Bot Started")
+    print("🚀 Smart Iraq News Bot started")
 
     service = get_blogger_service()
     blog_id, blog_name = get_blog_id(service)
@@ -127,38 +156,41 @@ def main():
         print("❌ No blog found")
         return
 
-    print(f"✅ Connected to: {blog_name}")
+    print(f"✅ Connected to blog: {blog_name}")
 
     history = get_recent_titles(service, blog_id)
     topics = get_trends()
 
-    topic = next((t for t in topics if not check_duplication(t, history)), random.choice(FALLBACK_TOPICS))
-    print(f"📝 Topic selected: {topic}")
+    topic = next(
+        (t for t in topics if not is_duplicate(t, history)),
+        random.choice(FALLBACK_TOPICS),
+    )
 
-    raw_md = generate_content(topic)
+    print(f"📝 Selected topic: {topic}")
 
-    lines = raw_md.strip().split("\n")
+    md_text = generate_article(topic)
+
+    lines = md_text.strip().split("\n")
     title = topic
-    if lines[0].startswith("#"):
-        title = lines[0].replace("#", "").strip()
-        content_md = "\n".join(lines[1:])
-    else:
-        content_md = raw_md
 
-    html = md.markdown(content_md)
-    img = get_ai_image()
+    if lines and lines[0].startswith("#"):
+        title = lines[0].replace("#", "").strip()
+        md_text = "\n".join(lines[1:])
+
+    html = md.markdown(md_text)
+    img = get_image()
 
     body = {
         "title": title,
         "content": f"""
-        <div style="text-align:center">
+        <div style="text-align:center;margin-bottom:20px">
             <img src="{img}" style="max-width:100%;border-radius:12px">
         </div>
         <div dir="rtl" style="text-align:right;line-height:1.8">
             {html}
         </div>
         """,
-        "labels": ["AI", "Technology"]
+        "labels": ["AI", "Technology"],
     }
 
     post = service.posts().insert(
@@ -167,7 +199,7 @@ def main():
         isDraft=False
     ).execute()
 
-    print(f"🎉 Published: {post.get('url')}")
+    print(f"🎉 Published successfully: {post.get('url')}")
 
 if __name__ == "__main__":
     main()
