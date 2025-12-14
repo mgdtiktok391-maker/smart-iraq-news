@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
+
 import os
-import json
 import random
 import re
 import feedparser
@@ -12,27 +12,31 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 
-# ================= Secrets =================
+# =================================================
+# 🔐 Secrets (مطابقة لما لديك في GitHub Secrets)
+# =================================================
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 REFRESH_TOKEN = os.getenv("REFRESH_TOKEN")
-BLOG_URL = os.getenv("BLOG_URL")  # optional, fallback only
+BLOG_URL = os.getenv("BLOG_URL")  # اختياري
 
 missing = [
-    name for name, val in {
+    name for name, value in {
         "GEMINI_API_KEY": GEMINI_API_KEY,
         "CLIENT_ID": CLIENT_ID,
         "CLIENT_SECRET": CLIENT_SECRET,
         "REFRESH_TOKEN": REFRESH_TOKEN,
-    }.items() if not val
+    }.items() if not value
 ]
 
 if missing:
     raise RuntimeError(f"❌ Missing secrets: {', '.join(missing)}")
 
-# ================= Gemini =================
+# =================================================
+# 🤖 Gemini Configuration (موديل مدعوم)
+# =================================================
 
 genai.configure(api_key=GEMINI_API_KEY)
 
@@ -44,7 +48,9 @@ FALLBACK_TOPICS = [
     "شرح تقنية البلوك تشين للمبتدئين",
 ]
 
-# ================= Blogger =================
+# =================================================
+# 📰 Blogger API
+# =================================================
 
 def get_blogger_service():
     creds = Credentials(
@@ -56,13 +62,13 @@ def get_blogger_service():
         scopes=["https://www.googleapis.com/auth/blogger"],
     )
 
-    # توليد access token فعلي
     creds.refresh(Request())
 
     return build("blogger", "v3", credentials=creds, cache_discovery=False)
 
 def get_blog_id(service):
     blogs = service.blogs().listByUser(userId="self").execute()
+
     if blogs.get("items"):
         blog = blogs["items"][0]
         return blog["id"], blog["name"]
@@ -84,19 +90,21 @@ def get_recent_titles(service, blog_id):
         for item in posts.get("items", []):
             titles.append(item.get("title", ""))
     except Exception as e:
-        print(f"⚠ History warning: {e}")
+        print(f"⚠ Warning while reading history: {e}")
     return titles
 
-# ================= Logic =================
+# =================================================
+# 🧠 Logic
+# =================================================
 
 def clean(text):
     return re.sub(r"[^\w\s]", "", text).lower()
 
 def is_duplicate(new_title, old_titles):
-    nw = set(clean(new_title).split())
-    for t in old_titles:
-        ow = set(clean(t).split())
-        if nw and len(nw & ow) / len(nw) > 0.5:
+    new_words = set(clean(new_title).split())
+    for old in old_titles:
+        old_words = set(clean(old).split())
+        if new_words and len(new_words & old_words) / len(new_words) > 0.5:
             return True
     return False
 
@@ -105,11 +113,12 @@ def get_trends():
         "https://trends.google.com/trends/trendingsearches/daily/rss?geo=SA",
         "https://trends.google.com/trends/trendingsearches/daily/rss?geo=EG",
     ]
+
     topics = []
     for url in urls:
         feed = feedparser.parse(url)
-        for e in feed.entries[:2]:
-            topics.append(e.title)
+        for entry in feed.entries[:2]:
+            topics.append(entry.title)
 
     topics.extend(FALLBACK_TOPICS)
     random.shuffle(topics)
@@ -119,7 +128,8 @@ def get_trends():
 def generate_article(topic):
     print(f"✍ Writing article: {topic}")
 
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    # موديل مستقر ومدعوم
+    model = genai.GenerativeModel("gemini-pro")
 
     prompt = f"""
     اكتب مقالًا تقنيًا عربيًا احترافيًا بعنوان: "{topic}"
@@ -127,14 +137,16 @@ def generate_article(topic):
     الشروط:
     - تنسيق Markdown
     - لغة عربية فصحى جذابة
-    - لا تقل عن 500 كلمة
+    - لا يقل عن 500 كلمة
     - بدون مقدمات زائدة
     """
 
-    res = model.generate_content(prompt)
-    if not res.text:
-        raise RuntimeError("Empty Gemini response")
-    return res.text
+    response = model.generate_content(prompt)
+
+    if not response or not response.text:
+        raise RuntimeError("Empty response from Gemini")
+
+    return response.text
 
 def get_image():
     seed = random.randint(1, 9999)
@@ -144,7 +156,9 @@ def get_image():
         f"?width=800&height=450&seed={seed}&nologo=true"
     )
 
-# ================= Main =================
+# =================================================
+# 🚀 Main
+# =================================================
 
 def main():
     print("🚀 Smart Iraq News Bot started")
@@ -168,26 +182,26 @@ def main():
 
     print(f"📝 Selected topic: {topic}")
 
-    md_text = generate_article(topic)
+    markdown_text = generate_article(topic)
 
-    lines = md_text.strip().split("\n")
+    lines = markdown_text.strip().split("\n")
     title = topic
 
     if lines and lines[0].startswith("#"):
         title = lines[0].replace("#", "").strip()
-        md_text = "\n".join(lines[1:])
+        markdown_text = "\n".join(lines[1:])
 
-    html = md.markdown(md_text)
-    img = get_image()
+    html_content = md.markdown(markdown_text)
+    image_url = get_image()
 
     body = {
         "title": title,
         "content": f"""
         <div style="text-align:center;margin-bottom:20px">
-            <img src="{img}" style="max-width:100%;border-radius:12px">
+            <img src="{image_url}" style="max-width:100%;border-radius:12px">
         </div>
         <div dir="rtl" style="text-align:right;line-height:1.8">
-            {html}
+            {html_content}
         </div>
         """,
         "labels": ["AI", "Technology"],
