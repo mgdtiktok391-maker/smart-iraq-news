@@ -3,13 +3,10 @@ import os
 import time
 import random
 import re
-import html
-from datetime import datetime
 import requests
 import feedparser
 import backoff
 import markdown as md
-import pytz
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
@@ -20,8 +17,21 @@ CLIENT_ID = os.environ["CLIENT_ID"]
 CLIENT_SECRET = os.environ["CLIENT_SECRET"]
 REFRESH_TOKEN = os.environ["REFRESH_TOKEN"]
 
-# الموديل الذكي والمجاني
 GEMINI_MODEL = "gemini-1.5-flash"
+
+# مواضيع احتياطية في حال فشل جلب الترند
+FALLBACK_TOPICS = [
+    "مستقبل الذكاء الاصطناعي في التعليم",
+    "أهم ميزات تحديثات أندرويد الأخيرة",
+    "كيف تحمي خصوصيتك على الإنترنت؟",
+    "تطورات تقنية 5G وتأثيرها عالمياً",
+    "أفضل تطبيقات تنظيم الوقت للطلاب",
+    "مقارنة بين العملات الرقمية والتقليدية",
+    "أسرار التصوير الاحترافي بالهاتف",
+    "الفرق بين شاشات OLED و LCD",
+    "كيف تبدأ مشروعك التجاري الإلكتروني",
+    "تأثير الروبوتات على سوق العمل"
+]
 
 def get_blogger_service():
     creds = Credentials(
@@ -43,11 +53,12 @@ def get_blog_id(service):
         return None
 
 def get_recent_titles(service, blog_id):
-    """جلب آخر 30 عنوان منشور للتأكد من عدم التكرار"""
+    """جلب العناوين السابقة (تم تصحيح الخطأ هنا)"""
     titles = []
     try:
+        # التصحيح: استخدام LIVE بالحروف الكبيرة
         posts = service.posts().list(
-            blogId=blog_id, fetchBodies=False, maxResults=30, status=["live"]
+            blogId=blog_id, fetchBodies=False, maxResults=20, status=["LIVE"]
         ).execute()
         for item in posts.get("items", []):
             titles.append(item.get("title", ""))
@@ -56,8 +67,6 @@ def get_recent_titles(service, blog_id):
     return titles
 
 def check_duplication(new_topic, old_titles):
-    """فحص ذكي للتشابه بين العناوين"""
-    # تنظيف النص للمقارنة
     def clean(text):
         return re.sub(r'[^\w\s]', '', text).lower()
     
@@ -66,30 +75,33 @@ def check_duplication(new_topic, old_titles):
     
     for title in old_titles:
         ot = clean(title)
-        # إذا تطابقت نصف الكلمات تقريباً نعتبره مكرراً
         common = new_words.intersection(set(ot.split()))
-        if len(common) > 0 and len(common) / len(new_words) > 0.5:
+        # إذا كان التشابه أكثر من 50% نعتبره مكرراً
+        if len(new_words) > 0 and len(common) / len(new_words) > 0.5:
             return True
     return False
 
 def get_trends():
-    """جلب ترندات من مصادر متعددة"""
     urls = [
-        # ترندات جوجل (العراق)
         "https://trends.google.com/trends/trendingsearches/daily/rss?geo=IQ",
-        # ترندات جوجل (السعودية - للمحتوى العربي)
         "https://trends.google.com/trends/trendingsearches/daily/rss?geo=SA",
-        # أخبار تقنية عالمية
         "https://trends.google.com/trends/trendingsearches/daily/rss?geo=US&cat=t"
     ]
     trends = []
+    print("Fetching trends...")
     for url in urls:
         try:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:5]:
+            if not feed.entries: continue
+            for entry in feed.entries[:3]:
                 trends.append({'title': entry.title, 'link': entry.link})
         except:
             continue
+    
+    # دمج المواضيع الاحتياطية لضمان وجود محتوى دائماً
+    for topic in FALLBACK_TOPICS:
+        trends.append({'title': topic, 'link': 'https://news.google.com'})
+        
     random.shuffle(trends)
     return trends
 
@@ -99,15 +111,13 @@ def generate_content_gemini(topic_title):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
     
     prompt = f"""
-    اكتب مقالاً احترافياً للمدونة حول الموضوع الرائج: "{topic_title}".
+    أنت محرر تقني محترف. اكتب مقالاً حصرياً للمدونة عن: "{topic_title}".
     
-    التعليمات:
-    1. العنوان: اجعله جذاباً جداً (Viral/Clickbait) لكن صادقاً، وضعه في أول سطر مسبوقاً بـ #.
-    2. الأسلوب: سردي، ممتع، وسهل القراءة باللهجة العربية الفصحى الحديثة.
-    3. البنية: مقدمة تشد الانتباه، تفاصيل الخبر، لماذا يهمنا هذا؟، وخاتمة.
-    4. التنسيق: استخدم Markdown (عناوين فرعية H2).
-    5. تجنب: المقدمات المملة مثل "في هذا المقال سوف نتحدث عن...". ادخل في الموضوع فوراً.
-    6. الطول: حوالي 600-800 كلمة.
+    الشروط:
+    1. العنوان: جذاب جداً (Viral) يبدأ بـ # في أول سطر.
+    2. المحتوى: لا يقل عن 600 كلمة، مقسم لفقرات بعناوين فرعية.
+    3. الأسلوب: شيق، عربي فصحى، ومفيد للقارئ.
+    4. التنسيق: استخدم Markdown.
     """
     
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
@@ -116,73 +126,75 @@ def generate_content_gemini(topic_title):
     return response.json()["candidates"][0]["content"]["parts"][0]["text"]
 
 def get_ai_image(query):
-    # استخدام خدمة Pollinations لتوليد صورة مجانية وسريعة بدون مفاتيح
-    # نأخذ أول كلمتين من العنوان للبحث
-    keywords = " ".join(query.split()[:3])
-    # نطلب صورة تقنية/واقعية
-    return f"https://image.pollinations.ai/prompt/hyperrealistic photo of {keywords}, high quality, 4k?width=1200&height=630&nologo=true"
+    # استخدام صور رمزية عامة للتقنية لضمان العمل دائماً
+    keywords = "technology news"
+    return f"https://image.pollinations.ai/prompt/{keywords}?width=1200&height=630&nologo=true&seed={random.randint(1,1000)}"
 
 def main():
     service = get_blogger_service()
     blog_id = get_blog_id(service)
     
     if not blog_id:
+        print("Error: Blog ID not found.")
         return
 
-    # 1. فحص ماذا نشرنا سابقاً
     history = get_recent_titles(service, blog_id)
-    
-    # 2. البحث عن ترند جديد
     candidates = get_trends()
-    selected_topic = None
     
+    selected_topic = None
     for cand in candidates:
         if not check_duplication(cand['title'], history):
             selected_topic = cand
             break
             
     if not selected_topic:
-        print("No new unique trends found. Exiting.")
-        return # لا ننشر شيئاً إذا كان كل شيء مكرراً
+        # إذا كان كل شيء مكرراً، خذ موضوعاً عشوائياً من الاحتياطي
+        print("All trends duplicated. Using random fallback.")
+        selected_topic = {'title': random.choice(FALLBACK_TOPICS), 'link': 'https://google.com'}
 
-    # 3. توليد المقال
-    raw_md = generate_content_gemini(selected_topic['title'])
-    
-    # استخراج العنوان
+    print(f"Selected Topic: {selected_topic['title']}")
+
+    try:
+        raw_md = generate_content_gemini(selected_topic['title'])
+    except Exception as e:
+        print(f"Gemini Error: {e}")
+        return
+
     lines = raw_md.split('\n')
     title = selected_topic['title']
     content_lines = []
+    
     for line in lines:
         if line.strip().startswith("# "):
             title = line.replace("#", "").strip()
         else:
             content_lines.append(line)
             
-    final_content_md = "\n".join(content_lines)
-    final_html = md.markdown(final_content_md)
-    
-    # 4. الصورة
+    final_html = md.markdown("\n".join(content_lines))
     img_url = get_ai_image(selected_topic['title'])
     
     post_body = f"""
-    <div style="text-align: center; margin-bottom: 15px;">
-        <img src="{img_url}" alt="{title}" style="max-width: 100%; border-radius: 8px;">
+    <div style="text-align: center; margin-bottom: 20px;">
+        <img src="{img_url}" alt="{title}" style="max-width: 100%; border-radius: 10px;">
     </div>
     {final_html}
-    <hr>
-    <p style="text-align:center; font-size: small; color: #666;">المصدر: {selected_topic['link']}</p>
+    <br><hr>
+    <p style="text-align:center; color: #888; font-size: small;">إعداد: فريق التحرير الذكي</p>
     """
     
-    # 5. النشر
     body = {
         "kind": "blogger#post",
         "title": title,
         "content": post_body,
-        "labels": ["ترند", "أخبار"]
+        "labels": ["تكنولوجيا", "أخبار"]
     }
     
-    post = service.posts().insert(blogId=blog_id, body=body, isDraft=False).execute()
-    print(f"Published: {post.get('url')}")
+    try:
+        # نشر مباشر (LIVE)
+        post = service.posts().insert(blogId=blog_id, body=body, isDraft=False).execute()
+        print(f"SUCCESS! Published to: {post.get('url')}")
+    except Exception as e:
+        print(f"Publishing Error: {e}")
 
 if __name__ == "__main__":
     main()
