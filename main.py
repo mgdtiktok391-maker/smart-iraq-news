@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import os
-import time
 import random
 import re
 import requests
@@ -19,18 +18,18 @@ REFRESH_TOKEN = os.environ["REFRESH_TOKEN"]
 
 GEMINI_MODEL = "gemini-1.5-flash"
 
-# مواضيع احتياطية في حال فشل جلب الترند
+# مواضيع احتياطية (تعمل دائماً إذا فشل الترند)
 FALLBACK_TOPICS = [
-    "مستقبل الذكاء الاصطناعي في التعليم",
-    "أهم ميزات تحديثات أندرويد الأخيرة",
-    "كيف تحمي خصوصيتك على الإنترنت؟",
-    "تطورات تقنية 5G وتأثيرها عالمياً",
-    "أفضل تطبيقات تنظيم الوقت للطلاب",
-    "مقارنة بين العملات الرقمية والتقليدية",
-    "أسرار التصوير الاحترافي بالهاتف",
-    "الفرق بين شاشات OLED و LCD",
-    "كيف تبدأ مشروعك التجاري الإلكتروني",
-    "تأثير الروبوتات على سوق العمل"
+    "مستقبل الذكاء الاصطناعي في حياتنا اليومية",
+    "أهم نصائح الحماية من الاختراق الإلكتروني",
+    "تطورات شبكات الجيل الخامس 5G",
+    "أفضل تطبيقات الهاتف لزيادة الإنتاجية",
+    "الفرق بين الواقع الافتراضي والواقع المعزز",
+    "كيف تبدأ بتعلم البرمجة من الصفر",
+    "أسرار التصوير الاحترافي بكاميرا الهاتف",
+    "مقارنة بين أشهر العملات الرقمية",
+    "كيفية الربح من الإنترنت للمبتدئين",
+    "تكنولوجيا السيارات الكهربائية ومستقبلها"
 ]
 
 def get_blogger_service():
@@ -53,17 +52,17 @@ def get_blog_id(service):
         return None
 
 def get_recent_titles(service, blog_id):
-    """جلب العناوين السابقة (تم تصحيح الخطأ هنا)"""
+    """جلب العناوين السابقة (بدون فلتر الحالة لتجنب المشاكل)"""
     titles = []
     try:
-        # التصحيح: استخدام LIVE بالحروف الكبيرة
+        # قمنا بإزالة status=["LIVE"] تماماً لتجنب أي خطأ
         posts = service.posts().list(
-            blogId=blog_id, fetchBodies=False, maxResults=20, status=["LIVE"]
+            blogId=blog_id, fetchBodies=False, maxResults=20
         ).execute()
         for item in posts.get("items", []):
             titles.append(item.get("title", ""))
     except Exception as e:
-        print(f"Warning: Could not fetch history: {e}")
+        print(f"Warning: Could not fetch history (Ignored): {e}")
     return titles
 
 def check_duplication(new_topic, old_titles):
@@ -76,7 +75,6 @@ def check_duplication(new_topic, old_titles):
     for title in old_titles:
         ot = clean(title)
         common = new_words.intersection(set(ot.split()))
-        # إذا كان التشابه أكثر من 50% نعتبره مكرراً
         if len(new_words) > 0 and len(common) / len(new_words) > 0.5:
             return True
     return False
@@ -98,7 +96,7 @@ def get_trends():
         except:
             continue
     
-    # دمج المواضيع الاحتياطية لضمان وجود محتوى دائماً
+    # دمج الاحتياطي
     for topic in FALLBACK_TOPICS:
         trends.append({'title': topic, 'link': 'https://news.google.com'})
         
@@ -111,13 +109,14 @@ def generate_content_gemini(topic_title):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
     
     prompt = f"""
-    أنت محرر تقني محترف. اكتب مقالاً حصرياً للمدونة عن: "{topic_title}".
+    اكتب مقالاً تقنياً مشوقاً للمدونة عن: "{topic_title}".
     
     الشروط:
-    1. العنوان: جذاب جداً (Viral) يبدأ بـ # في أول سطر.
-    2. المحتوى: لا يقل عن 600 كلمة، مقسم لفقرات بعناوين فرعية.
-    3. الأسلوب: شيق، عربي فصحى، ومفيد للقارئ.
-    4. التنسيق: استخدم Markdown.
+    1. عنوان جذاب (Viral) يبدأ بـ #.
+    2. مقدمة قوية، صلب الموضوع، وخاتمة.
+    3. لغة عربية فصحى سهلة.
+    4. استخدم تنسيق Markdown.
+    5. الطول: 600 كلمة تقريباً.
     """
     
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
@@ -126,16 +125,17 @@ def generate_content_gemini(topic_title):
     return response.json()["candidates"][0]["content"]["parts"][0]["text"]
 
 def get_ai_image(query):
-    # استخدام صور رمزية عامة للتقنية لضمان العمل دائماً
-    keywords = "technology news"
-    return f"https://image.pollinations.ai/prompt/{keywords}?width=1200&height=630&nologo=true&seed={random.randint(1,1000)}"
+    # صورة تقنية عشوائية لضمان العمل
+    seed = random.randint(1, 9999)
+    return f"https://image.pollinations.ai/prompt/futuristic technology concept art?width=1200&height=630&nologo=true&seed={seed}"
 
 def main():
+    print("Starting Bot...")
     service = get_blogger_service()
     blog_id = get_blog_id(service)
     
     if not blog_id:
-        print("Error: Blog ID not found.")
+        print("Error: Blog ID not found. Check BLOG_URL secret.")
         return
 
     history = get_recent_titles(service, blog_id)
@@ -148,8 +148,8 @@ def main():
             break
             
     if not selected_topic:
-        # إذا كان كل شيء مكرراً، خذ موضوعاً عشوائياً من الاحتياطي
-        print("All trends duplicated. Using random fallback.")
+        # إذا فشل كل شيء، نستخدم موضوعاً عشوائياً مضموناً
+        print("Using fallback topic...")
         selected_topic = {'title': random.choice(FALLBACK_TOPICS), 'link': 'https://google.com'}
 
     print(f"Selected Topic: {selected_topic['title']}")
@@ -157,7 +157,7 @@ def main():
     try:
         raw_md = generate_content_gemini(selected_topic['title'])
     except Exception as e:
-        print(f"Gemini Error: {e}")
+        print(f"Gemini API Error: {e}")
         return
 
     lines = raw_md.split('\n')
@@ -179,7 +179,7 @@ def main():
     </div>
     {final_html}
     <br><hr>
-    <p style="text-align:center; color: #888; font-size: small;">إعداد: فريق التحرير الذكي</p>
+    <p style="text-align:center; color: #888; font-size: small;">إعداد: الذكاء الاصطناعي</p>
     """
     
     body = {
@@ -190,7 +190,6 @@ def main():
     }
     
     try:
-        # نشر مباشر (LIVE)
         post = service.posts().insert(blogId=blog_id, body=body, isDraft=False).execute()
         print(f"SUCCESS! Published to: {post.get('url')}")
     except Exception as e:
