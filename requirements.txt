@@ -1,10 +1,8 @@
-google-api-python-client
-google-auth
-requests
-markdown
-bleach
-feedparser
-beautifulsoup4
-backoff
-pytz
 google-generativeai
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
+feedparser
+backoff
+markdown
+requests
