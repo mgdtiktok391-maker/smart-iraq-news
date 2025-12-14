@@ -1,9 +1,0 @@
-google-api-python-client
-google-auth
-requests
-markdown
-bleach
-feedparser
-beautifulsoup4
-backoff
-pytz
