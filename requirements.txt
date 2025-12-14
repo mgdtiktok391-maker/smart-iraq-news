@@ -1,8 +1,6 @@
-google-generativeai
-google-api-python-client
-google-auth-oauthlib
-google-auth-httplib2
-feedparser
-backoff
-markdown
 requests
+feedparser
+markdown
+backoff
+google-api-python-client
+google-auth
