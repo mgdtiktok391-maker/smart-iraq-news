@@ -7,3 +7,4 @@ feedparser
 beautifulsoup4
 backoff
 pytz
+google-generativeai
