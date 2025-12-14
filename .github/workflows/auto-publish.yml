@@ -2,18 +2,18 @@ name: Smart News Bot (Iraq Time)
 
 on:
   schedule:
-    # توقيتات النشر بتوقيت UTC (العراق +3)
-    # 09:00 UTC = 12:00 ظهراً بتوقيت بغداد
-    # 13:00 UTC = 04:00 عصراً بتوقيت بغداد
+    # 09:00 UTC = 12:00 ظهرًا بتوقيت بغداد
+    # 13:00 UTC = 04:00 عصرًا بتوقيت بغداد
     - cron: '0 9 * * *'
     - cron: '0 13 * * *'
-  workflow_dispatch: # زر للتجربة اليدوية
+  workflow_dispatch:
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v3
 
       - name: Set up Python
@@ -21,16 +21,18 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: Install libraries directly
+      - name: Install dependencies
         run: |
-          pip install --upgrade pip
-          pip install google-api-python-client google-auth requests markdown bleach feedparser backoff pytz
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: Run script
+      - name: Verify installed packages
+        run: |
+          pip list
+
+      - name: Run bot
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          BLOG_URL: ${{ secrets.BLOG_URL }}
-          CLIENT_ID: ${{ secrets.CLIENT_ID }}
-          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
-          REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
-        run: python main.py
+          BLOGGER_TOKEN: ${{ secrets.BLOGGER_TOKEN }}
+        run: |
+          python main.py
