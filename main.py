@@ -16,9 +16,10 @@ CLIENT_ID = os.environ["CLIENT_ID"]
 CLIENT_SECRET = os.environ["CLIENT_SECRET"]
 REFRESH_TOKEN = os.environ["REFRESH_TOKEN"]
 
-GEMINI_MODEL = "gemini-1.5-flash"
+# تغيير الموديل إلى النسخة المستقرة جداً
+GEMINI_MODEL = "gemini-pro"
 
-# مواضيع احتياطية (تعمل دائماً إذا فشل الترند)
+# مواضيع احتياطية
 FALLBACK_TOPICS = [
     "مستقبل الذكاء الاصطناعي في حياتنا اليومية",
     "أهم نصائح الحماية من الاختراق الإلكتروني",
@@ -52,10 +53,8 @@ def get_blog_id(service):
         return None
 
 def get_recent_titles(service, blog_id):
-    """جلب العناوين السابقة (بدون فلتر الحالة لتجنب المشاكل)"""
     titles = []
     try:
-        # قمنا بإزالة status=["LIVE"] تماماً لتجنب أي خطأ
         posts = service.posts().list(
             blogId=blog_id, fetchBodies=False, maxResults=20
         ).execute()
@@ -96,7 +95,6 @@ def get_trends():
         except:
             continue
     
-    # دمج الاحتياطي
     for topic in FALLBACK_TOPICS:
         trends.append({'title': topic, 'link': 'https://news.google.com'})
         
@@ -106,6 +104,7 @@ def get_trends():
 @backoff.on_exception(backoff.expo, Exception, max_tries=3)
 def generate_content_gemini(topic_title):
     print(f"Generating content for: {topic_title}")
+    # استخدام API v1 المستقر بدلاً من beta
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
     
     prompt = f"""
@@ -121,13 +120,19 @@ def generate_content_gemini(topic_title):
     
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     response = requests.post(url, json=payload, timeout=60)
-    response.raise_for_status()
+    
+    # طباعة الخطأ إذا حدث لفهمه
+    if response.status_code != 200:
+        print(f"Error Status: {response.status_code}")
+        print(f"Error Body: {response.text}")
+        response.raise_for_status()
+        
     return response.json()["candidates"][0]["content"]["parts"][0]["text"]
 
 def get_ai_image(query):
-    # صورة تقنية عشوائية لضمان العمل
     seed = random.randint(1, 9999)
-    return f"https://image.pollinations.ai/prompt/futuristic technology concept art?width=1200&height=630&nologo=true&seed={seed}"
+    # استخدام كلمات مفتاحية عامة بالإنجليزية لضمان دقة الصورة
+    return f"https://image.pollinations.ai/prompt/futuristic technology news concept art?width=1200&height=630&nologo=true&seed={seed}"
 
 def main():
     print("Starting Bot...")
@@ -148,7 +153,6 @@ def main():
             break
             
     if not selected_topic:
-        # إذا فشل كل شيء، نستخدم موضوعاً عشوائياً مضموناً
         print("Using fallback topic...")
         selected_topic = {'title': random.choice(FALLBACK_TOPICS), 'link': 'https://google.com'}
 
