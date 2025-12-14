@@ -16,7 +16,8 @@ from google.auth.transport.requests import Request
 # 🔐 Secrets
 # =================================================
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+HF_API_KEY = os.getenv("HF_API_KEY")
+
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 REFRESH_TOKEN = os.getenv("REFRESH_TOKEN")
@@ -24,7 +25,7 @@ BLOG_URL = os.getenv("BLOG_URL")
 
 missing = [
     k for k, v in {
-        "GEMINI_API_KEY": GEMINI_API_KEY,
+        "HF_API_KEY": HF_API_KEY,
         "CLIENT_ID": CLIENT_ID,
         "CLIENT_SECRET": CLIENT_SECRET,
         "REFRESH_TOKEN": REFRESH_TOKEN,
@@ -66,9 +67,9 @@ def get_blog_id(service):
 
 FALLBACK_TOPICS = [
     "أفضل طرق حماية الخصوصية على الإنترنت",
-    "مستقبل الذكاء الاصطناعي في التعليم",
-    "كيف تبدأ العمل الحر خطوة بخطوة",
     "أهم أدوات الإنتاجية الرقمية",
+    "كيف تبدأ العمل الحر خطوة بخطوة",
+    "مستقبل الذكاء الاصطناعي في التعليم",
     "شرح تقنية البلوك تشين للمبتدئين",
 ]
 
@@ -98,24 +99,21 @@ def get_trends():
     return topics
 
 # =================================================
-# 🤖 Gemini FREE (REST API)
+# 🤖 HuggingFace FREE (مستقر)
 # =================================================
 
 @backoff.on_exception(backoff.expo, Exception, max_tries=3)
 def generate_article(topic):
     print(f"✍ Writing article: {topic}")
 
-    url = (
-        "https://generativelanguage.googleapis.com/v1/models/"
-        "gemini-1.5-flash:generateContent"
-        f"?key={GEMINI_API_KEY}"
-    )
+    url = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
 
-    payload = {
-        "contents": [{
-            "parts": [{
-                "text": f"""
-اكتب مقالًا تقنيًا عربيًا احترافيًا بعنوان:
+    headers = {
+        "Authorization": f"Bearer {HF_API_KEY}"
+    }
+
+    prompt = f"""
+اكتب مقالًا عربيًا تقنيًا احترافيًا بعنوان:
 {topic}
 
 الشروط:
@@ -124,15 +122,20 @@ def generate_article(topic):
 - لا يقل عن 500 كلمة
 - بدون مقدمات زائدة
 """
-            }]
-        }]
+
+    payload = {
+        "inputs": prompt,
+        "parameters": {
+            "temperature": 0.7,
+            "max_new_tokens": 1200
+        }
     }
 
-    r = requests.post(url, json=payload, timeout=60)
+    r = requests.post(url, headers=headers, json=payload, timeout=120)
     r.raise_for_status()
 
     data = r.json()
-    return data["candidates"][0]["content"]["parts"][0]["text"]
+    return data[0]["generated_text"]
 
 def get_image():
     seed = random.randint(1, 9999)
