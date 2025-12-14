@@ -1,38 +1,36 @@
-name: Auto Publish to Blogger (Iraq Time)
+name: Smart News Bot (Iraq Time)
 
 on:
   schedule:
-    # التوقيتات بنظام UTC
-    # 9:00 UTC = 12:00 PM Baghdad
-    # 13:00 UTC = 4:00 PM Baghdad
+    # توقيتات النشر بتوقيت UTC (العراق +3)
+    # 09:00 UTC = 12:00 ظهراً بتوقيت بغداد
+    # 13:00 UTC = 04:00 عصراً بتوقيت بغداد
     - cron: '0 9 * * *'
     - cron: '0 13 * * *'
-  workflow_dispatch: # زر للتشغيل اليدوي للتجربة
+  workflow_dispatch: # زر للتجربة اليدوية
 
 jobs:
-  build_and_publish:
+  run-bot:
     runs-on: ubuntu-latest
-    
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-      
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
-        
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        
-    - name: Run Publisher Script
-      env:
-        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        BLOG_URL: ${{ secrets.BLOG_URL }}
-        CLIENT_ID: ${{ secrets.CLIENT_ID }}
-        CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
-        REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
-        # الموديل أصبح مضمناً في الكود لكن لا ضرر من تركه هنا
-      run: python main.py
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install libraries directly
+        run: |
+          pip install --upgrade pip
+          pip install google-api-python-client google-auth requests markdown bleach feedparser backoff pytz
+
+      - name: Run script
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BLOG_URL: ${{ secrets.BLOG_URL }}
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
+        run: python main.py
