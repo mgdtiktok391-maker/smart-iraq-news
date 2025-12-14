@@ -35,7 +35,7 @@ if missing:
     raise RuntimeError(f"❌ Missing secrets: {', '.join(missing)}")
 
 # =================================================
-# 🤖 Gemini Configuration (موديل مدعوم)
+# 🤖 Gemini Configuration (موديل مدعوم فعليًا)
 # =================================================
 
 genai.configure(api_key=GEMINI_API_KEY)
@@ -128,8 +128,8 @@ def get_trends():
 def generate_article(topic):
     print(f"✍ Writing article: {topic}")
 
-    # موديل مستقر ومدعوم
-    model = genai.GenerativeModel("gemini-pro")
+    # ✅ الموديل الصحيح
+    model = genai.GenerativeModel("models/gemini-1.0-pro")
 
     prompt = f"""
     اكتب مقالًا تقنيًا عربيًا احترافيًا بعنوان: "{topic}"
