@@ -16,21 +16,18 @@ CLIENT_ID = os.environ["CLIENT_ID"]
 CLIENT_SECRET = os.environ["CLIENT_SECRET"]
 REFRESH_TOKEN = os.environ["REFRESH_TOKEN"]
 
-# تغيير الموديل إلى النسخة المستقرة جداً
-GEMINI_MODEL = "gemini-pro"
-
-# مواضيع احتياطية
+# مواضيع احتياطية (تعمل دائماً)
 FALLBACK_TOPICS = [
-    "مستقبل الذكاء الاصطناعي في حياتنا اليومية",
-    "أهم نصائح الحماية من الاختراق الإلكتروني",
-    "تطورات شبكات الجيل الخامس 5G",
-    "أفضل تطبيقات الهاتف لزيادة الإنتاجية",
-    "الفرق بين الواقع الافتراضي والواقع المعزز",
-    "كيف تبدأ بتعلم البرمجة من الصفر",
-    "أسرار التصوير الاحترافي بكاميرا الهاتف",
-    "مقارنة بين أشهر العملات الرقمية",
-    "كيفية الربح من الإنترنت للمبتدئين",
-    "تكنولوجيا السيارات الكهربائية ومستقبلها"
+    "كيف يؤثر الذكاء الاصطناعي على مستقبل الوظائف؟",
+    "أهم 5 نصائح لحماية هاتفك من الاختراق",
+    "شرح مبسط لتقنية البلوك تشين والعملات الرقمية",
+    "تطورات شبكات الجيل الخامس 5G ومميزاتها",
+    "أفضل تطبيقات تنظيم الوقت وزيادة الإنتاجية",
+    "كيف تبدأ تعلم البرمجة من الصفر مجاناً",
+    "نصائح لالتقاط صور احترافية بكاميرا الهاتف",
+    "مقارنة بين العمل في الشركات والعمل الحر Freelance",
+    "أسرار التسويق الإلكتروني الناجح في 2025",
+    "تكنولوجيا السيارات ذاتية القيادة: إلى أين وصلت؟"
 ]
 
 def get_blogger_service():
@@ -53,6 +50,7 @@ def get_blog_id(service):
         return None
 
 def get_recent_titles(service, blog_id):
+    """جلب العناوين السابقة (بدون فلتر الحالة لتجنب المشاكل)"""
     titles = []
     try:
         posts = service.posts().list(
@@ -79,6 +77,7 @@ def check_duplication(new_topic, old_titles):
     return False
 
 def get_trends():
+    # محاولة جلب ترندات حقيقية
     urls = [
         "https://trends.google.com/trends/trendingsearches/daily/rss?geo=IQ",
         "https://trends.google.com/trends/trendingsearches/daily/rss?geo=SA",
@@ -95,6 +94,7 @@ def get_trends():
         except:
             continue
     
+    # دمج المواضيع الاحتياطية
     for topic in FALLBACK_TOPICS:
         trends.append({'title': topic, 'link': 'https://news.google.com'})
         
@@ -104,12 +104,9 @@ def get_trends():
 @backoff.on_exception(backoff.expo, Exception, max_tries=3)
 def generate_content_gemini(topic_title):
     print(f"Generating content for: {topic_title}")
-    # استخدام API v1 المستقر بدلاً من beta
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
     
     prompt = f"""
     اكتب مقالاً تقنياً مشوقاً للمدونة عن: "{topic_title}".
-    
     الشروط:
     1. عنوان جذاب (Viral) يبدأ بـ #.
     2. مقدمة قوية، صلب الموضوع، وخاتمة.
@@ -117,21 +114,33 @@ def generate_content_gemini(topic_title):
     4. استخدم تنسيق Markdown.
     5. الطول: 600 كلمة تقريباً.
     """
-    
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
-    response = requests.post(url, json=payload, timeout=60)
     
-    # طباعة الخطأ إذا حدث لفهمه
+    # === المحاولة الأولى: استخدام Gemini 1.5 Flash (الأحدث) ===
+    try:
+        print("Trying Gemini 1.5 Flash (v1beta)...")
+        url_flash = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        response = requests.post(url_flash, json=payload, timeout=60)
+        if response.status_code == 200:
+            return response.json()["candidates"][0]["content"]["parts"][0]["text"]
+    except Exception as e:
+        print(f"Flash model failed: {e}")
+
+    # === المحاولة الثانية: استخدام Gemini Pro (المستقر) ===
+    print("Trying Gemini Pro (v1) as backup...")
+    url_pro = f"https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
+    response = requests.post(url_pro, json=payload, timeout=60)
+    
+    # التحقق النهائي من الخطأ
     if response.status_code != 200:
-        print(f"Error Status: {response.status_code}")
-        print(f"Error Body: {response.text}")
+        print(f"CRITICAL ERROR: {response.text}")
         response.raise_for_status()
         
     return response.json()["candidates"][0]["content"]["parts"][0]["text"]
 
 def get_ai_image(query):
     seed = random.randint(1, 9999)
-    # استخدام كلمات مفتاحية عامة بالإنجليزية لضمان دقة الصورة
+    # استخدام كلمات مفتاحية بالإنجليزية لضمان دقة الصورة
     return f"https://image.pollinations.ai/prompt/futuristic technology news concept art?width=1200&height=630&nologo=true&seed={seed}"
 
 def main():
