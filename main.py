@@ -50,7 +50,7 @@ def get_blog_id(service):
         return None
 
 def get_recent_titles(service, blog_id):
-    """جلب العناوين السابقة (بدون فلتر الحالة لتجنب المشاكل)"""
+    """جلب العناوين السابقة"""
     titles = []
     try:
         posts = service.posts().list(
@@ -119,19 +119,22 @@ def generate_content_gemini(topic_title):
     # === المحاولة الأولى: استخدام Gemini 1.5 Flash (الأحدث) ===
     try:
         print("Trying Gemini 1.5 Flash (v1beta)...")
+        # تأكدنا من الرابط الصحيح لنسخة البيتا
         url_flash = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
         response = requests.post(url_flash, json=payload, timeout=60)
         if response.status_code == 200:
             return response.json()["candidates"][0]["content"]["parts"][0]["text"]
+        else:
+            print(f"Flash Error: {response.status_code} - {response.text}")
     except Exception as e:
         print(f"Flash model failed: {e}")
 
     # === المحاولة الثانية: استخدام Gemini Pro (المستقر) ===
     print("Trying Gemini Pro (v1) as backup...")
+    # تأكدنا من الرابط الصحيح للنسخة المستقرة
     url_pro = f"https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
     response = requests.post(url_pro, json=payload, timeout=60)
     
-    # التحقق النهائي من الخطأ
     if response.status_code != 200:
         print(f"CRITICAL ERROR: {response.text}")
         response.raise_for_status()
@@ -140,7 +143,6 @@ def generate_content_gemini(topic_title):
 
 def get_ai_image(query):
     seed = random.randint(1, 9999)
-    # استخدام كلمات مفتاحية بالإنجليزية لضمان دقة الصورة
     return f"https://image.pollinations.ai/prompt/futuristic technology news concept art?width=1200&height=630&nologo=true&seed={seed}"
 
 def main():
