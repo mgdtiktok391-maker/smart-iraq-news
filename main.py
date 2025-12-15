@@ -1,113 +1,199 @@
 # -*- coding: utf-8 -*-
-import os, random, requests
-from datetime import datetime
+import os, re, time, random, json, html, hashlib
+from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 
-import markdown as md
-import bleach
+import requests
+import backoff
+import feedparser
+from apscheduler.schedulers.background import BackgroundScheduler
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
-# ================== الإعدادات ==================
+import markdown as md
+import bleach
+
+from flask import Flask, request, jsonify
+
+# =================== إعدادات عامة ===================
 TZ = ZoneInfo("Asia/Baghdad")
 
-# أسرار مطلوبة (GitHub Secrets)
+# ⏰ أوقات النشر المعدلة
+POST_TIMES_LOCAL = ["12:00", "20:00"]
+
+SAFE_CALLS_PER_MIN = int(os.getenv("SAFE_CALLS_PER_MIN", "3"))
+AI_MAX_RETRIES = int(os.getenv("AI_MAX_RETRIES", "3"))
+AI_BACKOFF_BASE = int(os.getenv("AI_BACKOFF_BASE", "4"))
+
+# أسرار
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 BLOG_URL = os.environ["BLOG_URL"]
 CLIENT_ID = os.environ["CLIENT_ID"]
 CLIENT_SECRET = os.environ["CLIENT_SECRET"]
 REFRESH_TOKEN = os.environ["REFRESH_TOKEN"]
 
-# وضع النشر
-PUBLISH_MODE = os.getenv("PUBLISH_MODE", "live").lower()
-
-# ================== Gemini REST (الحل النهائي) ==================
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent"
-
-def ask_gemini(prompt: str) -> str:
-    payload = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": prompt}
-                ]
-            }
-        ],
-        "generationConfig": {
-            "temperature": 0.85,
-            "topP": 0.95,
-            "maxOutputTokens": 4096
-        }
-    }
-
-    r = requests.post(
-        f"{GEMINI_URL}?key={GEMINI_API_KEY}",
-        json=payload,
-        timeout=120
-    )
-
-    if r.status_code != 200:
-        raise RuntimeError(f"Gemini error {r.status_code}: {r.text}")
-
-    data = r.json()
-    return data["candidates"][0]["content"]["parts"][0]["text"]
-
-# ================== افتتاحيات متنوعة ==================
+# =================== صرامة الافتتاحيات ===================
 INTRO_STYLES = [
-    "ابدأ المقال بسؤال فلسفي يربط التكنولوجيا بحياة الإنسان.",
-    "ابدأ المقال بمشهد واقعي من الحياة اليومية.",
-    "ابدأ المقال بحقيقة أو رقم صادم.",
-    "ابدأ المقال بمقارنة بين الماضي والحاضر.",
-    "ابدأ المقال بإشكالية فكرية تثير الفضول.",
-    "ابدأ المقال بوصف سيناريو مستقبلي محتمل."
+    "ابدأ المقال بسؤال فلسفي عميق لا يُستخدم في مقالات تقنية تقليدية.",
+    "ابدأ المقال بمشهد واقعي من حياة شخص عادي يتأثر مباشرة بالموضوع.",
+    "ابدأ المقال بحقيقة صادمة أو رقم غير متوقع مرتبط بالموضوع.",
+    "ابدأ المقال بمقارنة ذكية بين الماضي والحاضر دون ذكر التقنية مباشرة.",
+    "ابدأ المقال بإشكالية فكرية تضع القارئ أمام مفترق طرق.",
+    "ابدأ المقال بسيناريو مستقبلي واقعي وكأنه حدث بالفعل.",
+    "ابدأ المقال بحكاية قصيرة جدًا (3–4 أسطر) ذات مغزى.",
+    "ابدأ المقال بسؤال أخلاقي محرج يتعلق بالموضوع.",
+    "ابدأ المقال بمفارقة عقلية تجعل القارئ يعيد التفكير.",
+    "ابدأ المقال بنقد فكرة شائعة ثم تفكيكها."
 ]
 
-# ================== مواضيع احتياطية (40) ==================
+INTRO_HISTORY_FILE = "intro_styles.jsonl"
+
+def pick_strict_intro():
+    used = [r.get("style") for r in load_jsonl(INTRO_HISTORY_FILE)][-10:]
+    available = [s for s in INTRO_STYLES if s not in used]
+    chosen = random.choice(available or INTRO_STYLES)
+    append_jsonl(INTRO_HISTORY_FILE, {
+        "style": chosen,
+        "time": datetime.now(TZ).isoformat()
+    })
+    return chosen
+
+# =================== 100 موضوع احتياطي ===================
 FALLBACK_TOPICS = [
-    "دور الابتكار في نهضة الأمم",
-    "مستقبل الذكاء الاصطناعي في التعليم",
-    "كيف تغيّر التكنولوجيا سلوك المجتمعات",
-    "الأمن الرقمي في العصر الحديث",
-    "التحول الرقمي في الدول النامية",
-    "أثر الخوارزميات على الرأي العام",
-    "التكنولوجيا بين الحرية والرقابة",
-    "الذكاء الاصطناعي وسوق العمل",
-    "المدن الذكية: حلم أم واقع",
-    "أخلاقيات الذكاء الاصطناعي",
-    "التكنولوجيا والهوية الثقافية",
-    "الاقتصاد المعرفي وأهميته",
-    "التعليم الإلكتروني وتحدياته",
-    "الذكاء الاصطناعي في السياسة",
-    "مستقبل العمل عن بعد",
-    "التحول الرقمي في الصحة",
-    "الذكاء الاصطناعي التوليدي",
-    "الأمن السيبراني العالمي",
-    "الاقتصاد الرقمي الحديث",
-    "الابتكار في الشرق الأوسط",
-    "الذكاء الاصطناعي والبحث العلمي",
-    "الثورة الصناعية الرابعة",
-    "الذكاء الاصطناعي والمجتمع",
-    "التكنولوجيا والتنمية المستدامة",
-    "كيف تفكر الآلة",
-    "الإنسان في عصر الخوارزميات",
-    "التكنولوجيا وتوازن القوة",
-    "مستقبل البرمجة",
-    "التكنولوجيا والتعليم الجامعي",
-    "التحول الرقمي الحكومي",
-    "الذكاء الاصطناعي وصناعة المحتوى",
-    "الإعلام الرقمي الحديث",
-    "التكنولوجيا وصناعة القرار",
-    "التفكير النقدي في العصر الرقمي",
-    "الابتكار وريادة الأعمال",
-    "الاقتصاد السلوكي والتكنولوجيا",
-    "البيانات الضخمة وصناعة المستقبل",
-    "الذكاء الاصطناعي والإبداع",
-    "التكنولوجيا والعدالة الاجتماعية",
-    "مستقبل المعرفة البشرية",
+    "كيف تُعيد التكنولوجيا تشكيل مفهوم السلطة",
+    "الذكاء الاصطناعي وحدود القرار البشري",
+    "هل نحن نعيش وهم الاختيار في العصر الرقمي؟",
+    "التكنولوجيا كأداة تحرر أم وسيلة ضبط",
+    "الابتكار حين يصبح عبئًا اجتماعيًا",
+    "اقتصاد الانتباه وتأثيره على الوعي",
+    "من يملك البيانات يملك المستقبل",
+    "الخوارزميات كفاعل سياسي غير مرئي",
+    "هل الذكاء الاصطناعي محايد فعلًا؟",
+    "التقدم التقني مقابل التآكل الإنساني",
+    "العقل البشري في مواجهة الآلة",
+    "التحكم الناعم: كيف تُدار المجتمعات رقميًا",
+    "مستقبل الخصوصية في عالم شفاف",
+    "هل التقنية تصنع الحقيقة؟",
+    "نهاية العمل كما نعرفه",
+    "الابتكار بدون أخلاق",
+    "الدولة الرقمية وحدود السيادة",
+    "التعليم في عصر اللايقين",
+    "المعرفة بين الإتاحة والتضليل",
+    "من يصمم الخوارزميات؟",
+    "الذكاء الاصطناعي كمرآة للإنسان",
+    "المجتمع المُراقَب طوعًا",
+    "هل نحن أحرار داخل الأنظمة الذكية؟",
+    "التكنولوجيا وإعادة تعريف النجاح",
+    "الإنسان كمنتج بيانات",
+    "كيف تغيرت السلطة بدون أن نشعر",
+    "التقدم السريع وثمنه الخفي",
+    "هل الابتكار دائمًا جيد؟",
+    "المستقبل الذي لم نختره",
+    "الآلة التي تفهم أكثر مما ينبغي",
+    "الذكاء الاصطناعي وصناعة القناعات",
+    "الاقتصاد الخوارزمي",
+    "حين تسبق الأدوات القيم",
+    "المعرفة السريعة مقابل الفهم العميق",
+    "التكنولوجيا واللامساواة الجديدة",
+    "الإنسان في مواجهة أنظمته",
+    "هل نثق بما تبنيه الخوارزميات؟",
+    "التحول الرقمي كتحول ثقافي",
+    "التقدم بلا بوصلة",
+    "من يحاسب الآلة؟",
+    "العقل الجمعي في العصر الرقمي",
+    "الذكاء الاصطناعي والهوية",
+    "الابتكار حين يفقد معناه",
+    "التكنولوجيا وإعادة تعريف الحقيقة",
+    "هل ما زال الإنسان في المركز؟",
+    "التحكم عبر الراحة",
+    "الآلة كمُربي خفي",
+    "المستقبل بين الكفاءة والمعنى",
+    "هل نحتاج إلى إبطاء التقدم؟",
+    "الذكاء الاصطناعي كقوة ناعمة",
+    "الوعي في زمن السرعة",
+    "من يصوغ السرديات الرقمية؟",
+    "الإنسان داخل الصندوق الذكي",
+    "التحكم بدون قمع",
+    "هل التقنية تُفكر عنا؟",
+    "المجتمع القابل للبرمجة",
+    "الذكاء الاصطناعي وصناعة الطاعة",
+    "التكنولوجيا كأيديولوجيا",
+    "هل ما زالت الحقيقة مهمة؟",
+    "الآلة التي تعلّمنا كيف نفكر",
+    "نهاية الخصوصية الطوعية",
+    "الإنسان كواجهة مستخدم",
+    "الذكاء الاصطناعي وإعادة تشكيل الأخلاق",
+    "من يضع قواعد المستقبل؟",
+    "التكنولوجيا بين التمكين والتجريد",
+    "الوعي في عصر الخوارزمية",
+    "هل نعيش داخل تجربة ضخمة؟",
+    "الآلة كوسيط للواقع",
+    "التحكم عبر التصميم",
+    "الذكاء الاصطناعي وسلطة التنبؤ",
+    "التكنولوجيا كبيئة لا أداة",
+    "هل ما زال التفكير حرًا؟",
+    "الابتكار حين يصبح إلزاميًا",
+    "الإنسان ككائن قابل للتحسين",
+    "الذكاء الاصطناعي وإعادة تعريف الخطأ",
+    "التقدم الذي لا ينتظرنا",
+    "من يتحكم في الأسئلة؟",
+    "الآلة التي تعرف أكثر مما نريد",
+    "التكنولوجيا وتآكل الغموض",
+    "الذكاء الاصطناعي ككاتب غير مرئي",
+    "المستقبل المصمم سلفًا",
+    "هل ما زال لدينا خيار؟",
+    "الآلة كذاكرة جمعية",
+    "التكنولوجيا وحدود المعنى",
+    "الذكاء الاصطناعي وإعادة تشكيل الزمن",
+    "الإنسان في عصر التوقع الدائم",
+    "الابتكار كضرورة لا كخيار",
+    "الآلة التي تفهم النوايا",
+    "نهاية العشوائية",
+    "الذكاء الاصطناعي وسلطة التفسير",
+    "التكنولوجيا كواقع بديل",
+    "هل ما زلنا نفكر بأنفسنا؟"
 ]
 
-# ================== Blogger ==================
+# =================== Gemini ===================
+GEMINI_API_ROOT = "https://generativelanguage.googleapis.com"
+GEN_CONFIG = {"temperature": 0.85, "topP": 0.9, "maxOutputTokens": 4096}
+
+def _rest_generate(ver: str, model: str, prompt: str):
+    url = f"{GEMINI_API_ROOT}/{ver}/models/{model}:generateContent?key={GEMINI_API_KEY}"
+    body = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": GEN_CONFIG,
+    }
+    r = requests.post(url, json=body, timeout=120)
+    if r.ok:
+        data = r.json()
+        if data.get("candidates"):
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+    return None
+
+@backoff.on_exception(backoff.expo, Exception, max_tries=3)
+def ask_gemini(prompt: str) -> str:
+    return _rest_generate("v1", "gemini-1.5-flash", prompt)
+
+# =================== المقال ===================
+def build_prompt(topic):
+    intro_rule = pick_strict_intro()
+    return f"""
+{intro_rule}
+
+اكتب مقالة عربية تحليلية عميقة.
+- لا تستخدم افتتاحية نمطية.
+- لا تُكرر صياغات معروفة.
+- الطول 1000–1400 كلمة.
+- بنية واضحة.
+- أضف قسم "المراجع" في النهاية.
+- العنوان في السطر الأول بصيغة # H1.
+
+الموضوع: {topic}
+""".strip()
+
+# =================== Blogger ===================
 def blogger_service():
     creds = Credentials(
         None,
@@ -119,67 +205,42 @@ def blogger_service():
     )
     return build("blogger", "v3", credentials=creds, cache_discovery=False)
 
-# ================== HTML ==================
-def clean_html(md_text: str) -> str:
-    raw = md.markdown(md_text)
-    return bleach.clean(
-        raw,
-        tags=bleach.sanitizer.ALLOWED_TAGS.union(
-            {"p","h1","h2","h3","ul","ol","li","strong","em","a","hr","br","img"}
-        ),
-        attributes={"a":["href","target","rel"],"img":["src","alt","loading","style"]},
-        strip=True,
-    )
-
-def image_block(title: str) -> str:
-    seed = abs(hash(title)) % 10000
-    url = f"https://source.unsplash.com/1200x630/?technology,innovation&sig={seed}"
-    return f"""
-<figure>
-  <img src="{url}" alt="{title}" loading="lazy"
-       style="max-width:100%;border-radius:8px;margin:auto;display:block;">
-</figure>
-<hr>
-"""
-
-# ================== النشر ==================
-def make_article_once(slot: int):
+def make_article_once(slot):
     topic = random.choice(FALLBACK_TOPICS)
-    intro = random.choice(INTRO_STYLES)
+    article = ask_gemini(build_prompt(topic))
+    if not article:
+        print("❌ فشل توليد المقال")
+        return
 
-    prompt = (
-        f"{intro}\n\n"
-        "اكتب مقالة عربية أصلية غير مكررة.\n"
-        "- السطر الأول عنوان H1 يبدأ بـ #\n"
-        "- الطول بين 1000 و1400 كلمة\n"
-        "- أسلوب تحليلي عميق\n"
-        "- لا تعيد افتتاحيات نمطية\n"
-        "- أضف قسم \"المراجع\" في النهاية\n\n"
-        f"الموضوع: {topic}"
-    )
-
-    article = ask_gemini(prompt).strip()
     lines = article.splitlines()
-
     title = topic
     if lines and lines[0].startswith("#"):
-        title = lines[0].replace("#","").strip()
+        title = lines[0].replace("#", "").strip()
         article = "\n".join(lines[1:])
 
-    html = image_block(title) + clean_html(article)
-
+    html_content = md.markdown(article)
     service = blogger_service()
     blog_id = service.blogs().getByUrl(url=BLOG_URL).execute()["id"]
 
     post = service.posts().insert(
         blogId=blog_id,
-        body={"title": title, "content": html},
-        isDraft=(PUBLISH_MODE != "live")
+        body={"title": title, "content": html_content},
+        isDraft=False
     ).execute()
 
-    print("✅ PUBLISHED:", post.get("url"))
+    print("✅ نُشر:", post.get("url"))
 
-# ================== تشغيل ==================
+# =================== الجدولة ===================
+def schedule_jobs():
+    sched = BackgroundScheduler(timezone=TZ)
+    for i, t in enumerate(POST_TIMES_LOCAL):
+        h, m = map(int, t.split(":"))
+        sched.add_job(lambda i=i: make_article_once(i),
+                      "cron", hour=h, minute=m)
+    sched.start()
+    print("⏰ الجدولة مفعلة:", POST_TIMES_LOCAL)
+
 if __name__ == "__main__":
-    slot = int(os.getenv("SLOT","0"))
-    make_article_once(slot)
+    schedule_jobs()
+    while True:
+        time.sleep(60)
