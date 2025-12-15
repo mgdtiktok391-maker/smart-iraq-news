@@ -117,7 +117,7 @@ def image_block(title: str) -> str:
 
 # ================== Gemini (SDK) ==================
 def ask_gemini(prompt: str) -> str:
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-pro")
     resp = model.generate_content(prompt)
     return resp.text or ""
 
