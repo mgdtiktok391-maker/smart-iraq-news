@@ -10,26 +10,29 @@ import google.generativeai as genai
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
-# ================== إعدادات ==================
+# ================== الإعدادات ==================
 TZ = ZoneInfo("Asia/Baghdad")
 
+# أسرار مطلوبة (GitHub Secrets)
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 BLOG_URL = os.environ["BLOG_URL"]
 CLIENT_ID = os.environ["CLIENT_ID"]
 CLIENT_SECRET = os.environ["CLIENT_SECRET"]
 REFRESH_TOKEN = os.environ["REFRESH_TOKEN"]
 
+# وضع النشر
 PUBLISH_MODE = os.getenv("PUBLISH_MODE", "live").lower()
 
+# تهيئة Gemini SDK
 genai.configure(api_key=GEMINI_API_KEY)
 
 # ================== افتتاحيات متنوعة ==================
 INTRO_STYLES = [
-    "ابدأ المقال بسؤال فلسفي يربط التكنولوجيا بالإنسان.",
-    "ابدأ المقال بمشهد واقعي من حياتنا اليومية.",
+    "ابدأ المقال بسؤال فلسفي يربط التكنولوجيا بحياة الإنسان.",
+    "ابدأ المقال بمشهد واقعي من الحياة اليومية.",
     "ابدأ المقال بحقيقة أو رقم صادم.",
     "ابدأ المقال بمقارنة بين الماضي والحاضر.",
-    "ابدأ المقال بإشكالية فكرية عميقة.",
+    "ابدأ المقال بإشكالية فكرية تثير الفضول.",
     "ابدأ المقال بوصف سيناريو مستقبلي محتمل."
 ]
 
@@ -74,7 +77,7 @@ FALLBACK_TOPICS = [
     "البيانات الضخمة وصناعة المستقبل",
     "الذكاء الاصطناعي والإبداع",
     "التكنولوجيا والعدالة الاجتماعية",
-    "مستقبل المعرفة البشرية"
+    "مستقبل المعرفة البشرية",
 ]
 
 # ================== Blogger ==================
@@ -89,8 +92,8 @@ def blogger_service():
     )
     return build("blogger", "v3", credentials=creds, cache_discovery=False)
 
-# ================== أدوات ==================
-def clean_html(md_text):
+# ================== أدوات HTML ==================
+def clean_html(md_text: str) -> str:
     raw = md.markdown(md_text)
     return bleach.clean(
         raw,
@@ -101,7 +104,7 @@ def clean_html(md_text):
         strip=True,
     )
 
-def image_block(title):
+def image_block(title: str) -> str:
     seed = abs(hash(title)) % 10000
     url = f"https://source.unsplash.com/1200x630/?technology,innovation&sig={seed}"
     return f"""
@@ -112,14 +115,14 @@ def image_block(title):
 <hr>
 """
 
-# ================== Gemini ==================
-def ask_gemini(prompt):
+# ================== Gemini (SDK) ==================
+def ask_gemini(prompt: str) -> str:
     model = genai.GenerativeModel("gemini-1.5-flash")
-    response = model.generate_content(prompt)
-    return response.text
+    resp = model.generate_content(prompt)
+    return resp.text or ""
 
 # ================== النشر ==================
-def make_article_once(slot):
+def make_article_once(slot: int):
     topic = random.choice(FALLBACK_TOPICS)
     intro = random.choice(INTRO_STYLES)
 
