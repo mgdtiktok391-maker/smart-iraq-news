@@ -1,15 +1,12 @@
-name: Auto Publish (Baghdad 12:00 & 20:00)
+name: Auto Publish (Baghdad Time)
 
 on:
   schedule:
-    - cron: "0 9 * * *"   # 12:00 بغداد
-    - cron: "0 17 * * *"  # 20:00 بغداد
+    # 12:00 ظهرًا بغداد (09:00 UTC)
+    - cron: "0 9 * * *"
+    # 20:00 مساءً بغداد (17:00 UTC)
+    - cron: "0 17 * * *"
   workflow_dispatch:
-    inputs:
-      slot:
-        description: "0 = نشر واحد | 1 = نشر واحد | 2 = نشر الاثنين"
-        required: false
-        default: "2"
 
 concurrency:
   group: auto-publish
@@ -21,15 +18,31 @@ jobs:
     timeout-minutes: 30
 
     env:
+      # نترك التحكم بالكامل للماين
       PUBLISH_MODE: live
+      USE_EXTERNAL_CRON: "0"
+
+      # مفاتيح أساسية
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       BLOG_URL: ${{ secrets.BLOG_URL }}
       CLIENT_ID: ${{ secrets.CLIENT_ID }}
       CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
       REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
 
+      # مفاتيح الصور (اختياري)
+      PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+      PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+      UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
+      FEATURED_IMAGE_URL: ${{ secrets.FEATURED_IMAGE_URL }}
+
+      # ثوابت أمان
+      SAFE_CALLS_PER_MIN: "3"
+      AI_MAX_RETRIES: "3"
+      AI_BACKOFF_BASE: "4"
+      TITLE_WINDOW: "40"
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -37,35 +50,13 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies (exact match)
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install \
-            google-generativeai \
-            google-api-python-client \
-            google-auth \
-            markdown \
-            bleach
+          pip install google-api-python-client google-auth \
+                      requests feedparser backoff flask apscheduler \
+                      markdown bleach
 
-      # التشغيل المجدول
-      - name: Publish scheduled slot
-        if: ${{ github.event_name == 'schedule' }}
+      - name: Run publisher
         run: |
-          H=$(date -u +%H)
-          if [ "$H" = "09" ]; then
-            export SLOT=0
-          else
-            export SLOT=1
-          fi
           python main.py
-
-      # التشغيل اليدوي
-      - name: Publish manual
-        if: ${{ github.event_name == 'workflow_dispatch' }}
-        run: |
-          if [ "${{ inputs.slot }}" = "2" ]; then
-            SLOT=0 python main.py
-            SLOT=1 python main.py
-          else
-            SLOT=${{ inputs.slot }} python main.py
-          fi
