@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
-import os, random
+import os, random, requests
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import markdown as md
 import bleach
 
-import google.generativeai as genai
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
@@ -23,8 +22,36 @@ REFRESH_TOKEN = os.environ["REFRESH_TOKEN"]
 # وضع النشر
 PUBLISH_MODE = os.getenv("PUBLISH_MODE", "live").lower()
 
-# تهيئة Gemini SDK
-genai.configure(api_key=GEMINI_API_KEY)
+# ================== Gemini REST (الحل النهائي) ==================
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent"
+
+def ask_gemini(prompt: str) -> str:
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt}
+                ]
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.85,
+            "topP": 0.95,
+            "maxOutputTokens": 4096
+        }
+    }
+
+    r = requests.post(
+        f"{GEMINI_URL}?key={GEMINI_API_KEY}",
+        json=payload,
+        timeout=120
+    )
+
+    if r.status_code != 200:
+        raise RuntimeError(f"Gemini error {r.status_code}: {r.text}")
+
+    data = r.json()
+    return data["candidates"][0]["content"]["parts"][0]["text"]
 
 # ================== افتتاحيات متنوعة ==================
 INTRO_STYLES = [
@@ -92,7 +119,7 @@ def blogger_service():
     )
     return build("blogger", "v3", credentials=creds, cache_discovery=False)
 
-# ================== أدوات HTML ==================
+# ================== HTML ==================
 def clean_html(md_text: str) -> str:
     raw = md.markdown(md_text)
     return bleach.clean(
@@ -115,12 +142,6 @@ def image_block(title: str) -> str:
 <hr>
 """
 
-# ================== Gemini (SDK) ==================
-def ask_gemini(prompt: str) -> str:
-    model = genai.GenerativeModel("gemini-pro")
-    resp = model.generate_content(prompt)
-    return resp.text or ""
-
 # ================== النشر ==================
 def make_article_once(slot: int):
     topic = random.choice(FALLBACK_TOPICS)
@@ -128,10 +149,11 @@ def make_article_once(slot: int):
 
     prompt = (
         f"{intro}\n\n"
-        "اكتب مقالة عربية متكاملة.\n"
+        "اكتب مقالة عربية أصلية غير مكررة.\n"
         "- السطر الأول عنوان H1 يبدأ بـ #\n"
         "- الطول بين 1000 و1400 كلمة\n"
-        "- أسلوب تحليلي عميق غير مكرر\n"
+        "- أسلوب تحليلي عميق\n"
+        "- لا تعيد افتتاحيات نمطية\n"
         "- أضف قسم \"المراجع\" في النهاية\n\n"
         f"الموضوع: {topic}"
     )
@@ -157,6 +179,7 @@ def make_article_once(slot: int):
 
     print("✅ PUBLISHED:", post.get("url"))
 
+# ================== تشغيل ==================
 if __name__ == "__main__":
     slot = int(os.getenv("SLOT","0"))
     make_article_once(slot)
