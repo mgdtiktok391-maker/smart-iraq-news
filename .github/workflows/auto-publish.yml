@@ -15,34 +15,31 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
 
     env:
-      # نترك التحكم بالكامل للماين
       PUBLISH_MODE: live
       USE_EXTERNAL_CRON: "0"
+      RUN_ONCE: "1"   # ⭐⭐⭐ هذا هو المفتاح ⭐⭐⭐
 
-      # مفاتيح أساسية
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       BLOG_URL: ${{ secrets.BLOG_URL }}
       CLIENT_ID: ${{ secrets.CLIENT_ID }}
       CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
       REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
 
-      # مفاتيح الصور (اختياري)
       PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
       PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
       UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
       FEATURED_IMAGE_URL: ${{ secrets.FEATURED_IMAGE_URL }}
 
-      # ثوابت أمان
       SAFE_CALLS_PER_MIN: "3"
       AI_MAX_RETRIES: "3"
       AI_BACKOFF_BASE: "4"
       TITLE_WINDOW: "40"
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -57,6 +54,6 @@ jobs:
                       requests feedparser backoff flask apscheduler \
                       markdown bleach
 
-      - name: Run publisher
+      - name: Run publisher (one-shot)
         run: |
           python main.py
