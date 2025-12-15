@@ -1,20 +1,16 @@
-name: Auto Publish (Live + Schedule)
+name: Auto Publish (Baghdad Time)
 
 on:
   schedule:
-    # 06:00 و 14:00 UTC = 09:00 و 17:00 بتوقيت بغداد
+    # 06:00 و 14:00 UTC = 09:00 و 17:00 بغداد
     - cron: "0 6 * * *"
     - cron: "0 14 * * *"
   workflow_dispatch:
     inputs:
       slot:
-        description: "اختر الفتحة: 0 (صباح) ، 1 (مساء) ، 2 (الاثنتان معًا)"
+        description: "0 صباح / 1 مساء / 2 كلاهما"
         required: false
         default: "2"
-
-concurrency:
-  group: auto-publish
-  cancel-in-progress: false
 
 jobs:
   publish:
@@ -22,27 +18,7 @@ jobs:
     timeout-minutes: 30
 
     env:
-      # نُجبر النشر المباشر
       PUBLISH_MODE: live
-      USE_EXTERNAL_CRON: "0"
-      RUN_ONCE: "0"
-
-      # منع تكرار المواضيع
-      TOPIC_WINDOW_DAYS: ${{ secrets.TOPIC_WINDOW_DAYS || '14' }}
-
-      # مفاتيح الصور (اختياري)
-      PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
-      PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
-      UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
-      FEATURED_IMAGE_URL: ${{ secrets.FEATURED_IMAGE_URL }}
-
-      # ضبطات الأمان
-      SAFE_CALLS_PER_MIN: "3"
-      AI_MAX_RETRIES: "3"
-      AI_BACKOFF_BASE: "4"
-      TITLE_WINDOW: "40"
-
-      # أسرار أساسية
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       BLOG_URL: ${{ secrets.BLOG_URL }}
       CLIENT_ID: ${{ secrets.CLIENT_ID }}
@@ -61,49 +37,24 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          else
-            pip install google-api-python-client google-auth \
-                        requests feedparser backoff flask apscheduler \
-                        markdown bleach
-          fi
+          pip install google-api-python-client google-auth requests backoff markdown bleach feedparser
 
-      # ======================
-      # تشغيل مجدول (slot واحد)
-      # ======================
+      # ===== تشغيل مجدول =====
       - name: Publish scheduled slot
         if: ${{ github.event_name == 'schedule' }}
         run: |
           H=$(date -u +%H)
-          if [ "$H" = "06" ]; then SLOT=0; else SLOT=1; fi
+          if [ "$H" = "06" ]; then SLOT=0; elif [ "$H" = "14" ]; then SLOT=1; else exit 0; fi
           echo "Publishing SLOT=$SLOT"
-          python - <<PY
-          import os
-          from main import make_article_once
-          make_article_once(int(os.environ["SLOT"]))
-          PY
-        env:
-          SLOT: ${{ env.SLOT || '0' }}
+          SLOT=$SLOT python main.py
 
-      # ======================
-      # تشغيل يدوي (slot واحد)
-      # ======================
-      - name: Publish single slot (manual 0 or 1)
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.slot != '2' }}
+      # ===== تشغيل يدوي =====
+      - name: Publish manual
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
-          python - <<PY
-          from main import make_article_once
-          slot = int("${{ inputs.slot }}")
-          if slot not in (0,1):
-              raise SystemExit("slot must be 0 or 1")
-          make_article_once(slot)
-          PY
-
-      # ======================
-      # تشغيل يدوي (الاثنان)
-      # ======================
-      - name: Publish both slots (manual 2)
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.slot == '2' }}
-        run: |
-          RUN_ONCE=1 USE_EXTERNAL_CRON=0 python main.py
+          if [ "${{ inputs.slot }}" = "2" ]; then
+            SLOT=0 python main.py
+            SLOT=1 python main.py
+          else
+            SLOT=${{ inputs.slot }} python main.py
+          fi
