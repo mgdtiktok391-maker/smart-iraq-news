@@ -13,25 +13,23 @@ from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 
 # =================================================
-# 🔐 Secrets
+# 🔐 Secrets (مطابقة للـ workflow)
 # =================================================
 
 HF_API_KEY = os.getenv("HF_API_KEY")
-
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 REFRESH_TOKEN = os.getenv("REFRESH_TOKEN")
 BLOG_URL = os.getenv("BLOG_URL")
 
-missing = [
-    k for k, v in {
-        "HF_API_KEY": HF_API_KEY,
-        "CLIENT_ID": CLIENT_ID,
-        "CLIENT_SECRET": CLIENT_SECRET,
-        "REFRESH_TOKEN": REFRESH_TOKEN,
-    }.items() if not v
-]
+required = {
+    "HF_API_KEY": HF_API_KEY,
+    "CLIENT_ID": CLIENT_ID,
+    "CLIENT_SECRET": CLIENT_SECRET,
+    "REFRESH_TOKEN": REFRESH_TOKEN,
+}
 
+missing = [k for k, v in required.items() if not v]
 if missing:
     raise RuntimeError(f"❌ Missing secrets: {', '.join(missing)}")
 
@@ -61,25 +59,48 @@ def get_blog_id(service):
         return b["id"], b["name"]
     return None, None
 
+def get_recent_titles(service, blog_id):
+    posts = service.posts().list(
+        blogId=blog_id,
+        fetchBodies=False,
+        maxResults=15
+    ).execute()
+    return [p.get("title", "") for p in posts.get("items", [])]
+
 # =================================================
-# 🧠 Logic
+# 🧠 Topics
 # =================================================
 
 FALLBACK_TOPICS = [
     "أفضل طرق حماية الخصوصية على الإنترنت",
-    "أهم أدوات الإنتاجية الرقمية",
-    "كيف تبدأ العمل الحر خطوة بخطوة",
+    "كيف تحمي بياناتك الشخصية من الاختراق",
+    "أهم أدوات الإنتاجية الرقمية في 2025",
     "مستقبل الذكاء الاصطناعي في التعليم",
+    "كيف يؤثر الذكاء الاصطناعي على سوق العمل",
+    "دليل المبتدئين إلى الأمن السيبراني",
+    "أخطر الأخطاء الشائعة في استخدام الإنترنت",
+    "كيف تختار كلمة مرور قوية وآمنة",
+    "الفرق بين الذكاء الاصطناعي والتعلم الآلي",
+    "أهم تطبيقات الذكاء الاصطناعي في الحياة اليومية",
+    "كيف يعمل الإنترنت من الناحية التقنية",
+    "مفهوم الحوسبة السحابية بطريقة مبسطة",
+    "إيجابيات وسلبيات العمل عن بُعد",
+    "كيف تبدأ العمل الحر خطوة بخطوة",
+    "أفضل المهارات الرقمية المطلوبة في المستقبل",
     "شرح تقنية البلوك تشين للمبتدئين",
+    "ما هو إنترنت الأشياء وكيف يعمل",
+    "كيف تميّز بين الأخبار الصحيحة والمضللة",
+    "مستقبل التجارة الإلكترونية عالميًا",
+    "أهمية التفكير النقدي في العصر الرقمي",
 ]
 
 def clean(text):
     return re.sub(r"[^\w\s]", "", text).lower()
 
-def is_duplicate(title, old_titles):
+def is_duplicate(title, history):
     nw = set(clean(title).split())
-    for t in old_titles:
-        ow = set(clean(t).split())
+    for h in history:
+        ow = set(clean(h).split())
         if nw and len(nw & ow) / len(nw) > 0.5:
             return True
     return False
@@ -99,21 +120,21 @@ def get_trends():
     return topics
 
 # =================================================
-# 🤖 HuggingFace FREE (مستقر)
+# 🤖 Hugging Face (نموذج مستقر)
 # =================================================
 
 @backoff.on_exception(backoff.expo, Exception, max_tries=3)
 def generate_article(topic):
     print(f"✍ Writing article: {topic}")
 
-    url = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
-
+    url = "https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta"
     headers = {
-        "Authorization": f"Bearer {HF_API_KEY}"
+        "Authorization": f"Bearer {HF_API_KEY}",
+        "Content-Type": "application/json",
     }
 
     prompt = f"""
-اكتب مقالًا عربيًا تقنيًا احترافيًا بعنوان:
+اكتب مقالًا تقنيًا عربيًا احترافيًا بعنوان:
 {topic}
 
 الشروط:
@@ -127,21 +148,25 @@ def generate_article(topic):
         "inputs": prompt,
         "parameters": {
             "temperature": 0.7,
-            "max_new_tokens": 1200
+            "max_new_tokens": 1200,
+            "return_full_text": False
         }
     }
 
-    r = requests.post(url, headers=headers, json=payload, timeout=120)
-    r.raise_for_status()
+    r = requests.post(url, headers=headers, json=payload, timeout=180)
+    if r.status_code != 200:
+        raise RuntimeError(f"HF error {r.status_code}: {r.text}")
 
     data = r.json()
-    return data[0]["generated_text"]
+    if isinstance(data, list):
+        return data[0]["generated_text"]
+    raise RuntimeError(f"Unexpected HF response: {data}")
 
 def get_image():
     seed = random.randint(1, 9999)
     return (
         "https://image.pollinations.ai/prompt/"
-        "futuristic%20technology%20ai%20background"
+        "futuristic%20technology%20background"
         f"?width=800&height=450&seed={seed}&nologo=true"
     )
 
@@ -160,13 +185,7 @@ def main():
 
     print(f"✅ Connected to blog: {blog_name}")
 
-    history = [
-        p.get("title", "")
-        for p in service.posts().list(
-            blogId=blog_id, fetchBodies=False, maxResults=15
-        ).execute().get("items", [])
-    ]
-
+    history = get_recent_titles(service, blog_id)
     topic = next(
         (t for t in get_trends() if not is_duplicate(t, history)),
         random.choice(FALLBACK_TOPICS)
@@ -188,7 +207,7 @@ def main():
     body = {
         "title": title,
         "content": f"""
-<div style="text-align:center">
+<div style="text-align:center;margin-bottom:20px">
 <img src="{img}" style="max-width:100%;border-radius:12px">
 </div>
 <div dir="rtl" style="text-align:right;line-height:1.8">
