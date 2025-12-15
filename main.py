@@ -117,24 +117,50 @@ def image_block(title):
     seed = abs(hash(title)) % 10000
     url = f"https://source.unsplash.com/1200x630/?technology,innovation&sig={seed}"
     return f"""
-    <figure>
-      <img src="{url}" alt="{title}" loading="lazy"
-           style="max-width:100%;border-radius:8px;margin:auto;display:block;">
-    </figure>
-    <hr>
-    """
+<figure>
+  <img src="{url}" alt="{title}" loading="lazy"
+       style="max-width:100%;border-radius:8px;margin:auto;display:block;">
+</figure>
+<hr>
+"""
 
 # ================== النشر ==================
 def make_article_once(slot):
     topic = random.choice(FALLBACK_TOPICS)
     intro_style = random.choice(INTRO_STYLES)
 
-    prompt = f"""
-{intro_style}
+    prompt = (
+        f"{intro_style}\n\n"
+        "اكتب مقالة عربية متكاملة.\n"
+        "- السطر الأول عنوان H1 يبدأ بـ #\n"
+        "- الطول بين 1000 و1400 كلمة\n"
+        "- أسلوب تحليلي عميق غير مكرر\n"
+        "- لا تبدأ بمقدمة نمطية\n"
+        "- أضف قسم \"المراجع\" في النهاية\n\n"
+        f"الموضوع: {topic}\n"
+    )
 
-اكتب مقالة عربية متكاملة.
-- السطر الأول عنوان H1 يبدأ بـ #
-- الطول بين 1000 و1400 كلمة
-- أسلوب تحليلي عميق غير مكرر
-- لا تبدأ بمقدمة نمطية
-- أضف قسم "المرا
+    article = ask_gemini(prompt).strip()
+    lines = article.splitlines()
+
+    title = topic
+    if lines and lines[0].startswith("#"):
+        title = lines[0].replace("#","").strip()
+        article = "\n".join(lines[1:])
+
+    html = image_block(title) + clean_html(article)
+
+    service = blogger_service()
+    blog_id = service.blogs().getByUrl(url=BLOG_URL).execute()["id"]
+
+    post = service.posts().insert(
+        blogId=blog_id,
+        body={"title": title, "content": html},
+        isDraft=(PUBLISH_MODE != "live")
+    ).execute()
+
+    print("✅ PUBLISHED:", post.get("url"))
+
+if __name__ == "__main__":
+    slot = int(os.getenv("SLOT","0"))
+    make_article_once(slot)
